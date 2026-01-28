@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.db
+*.sqlite
+*.sqlite3
+.git
+.gitignore
+README.md
+RAILWAY_SETUP.md
+.DS_Store
