@@ -55,14 +55,25 @@ class Database:
 
             await db.commit()
 
-    async def add_user(self, user_id: int, username: str, full_name: str):
-        """Добавить нового пользователя"""
+    async def add_user(self, user_id: int, username: str, full_name: str) -> bool:
+        """Добавить нового пользователя. Возвращает True если пользователь новый."""
         async with aiosqlite.connect(self.db_path) as db:
+            # Проверяем, существует ли пользователь
+            async with db.execute("""
+                SELECT user_id FROM users WHERE user_id = ?
+            """, (user_id,)) as cursor:
+                existing = await cursor.fetchone()
+
+            if existing:
+                return False  # Пользователь уже существует
+
+            # Добавляем нового пользователя
             await db.execute("""
-                INSERT OR IGNORE INTO users (user_id, username, full_name, registration_date)
+                INSERT INTO users (user_id, username, full_name, registration_date)
                 VALUES (?, ?, ?, ?)
             """, (user_id, username, full_name, datetime.now().isoformat()))
             await db.commit()
+            return True  # Новый пользователь
 
     async def update_user_email(self, user_id: int, email: str):
         """Обновить email пользователя"""
