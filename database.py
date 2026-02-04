@@ -174,3 +174,13 @@ class Database:
             """) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    async def get_unpaid_users(self) -> List[Dict]:
+        """Получить пользователей, которые не оплатили"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM users WHERE is_paid = 0 ORDER BY registration_date DESC
+            """) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
