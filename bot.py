@@ -71,7 +71,7 @@ def get_documents_keyboard():
                 url="https://drive.google.com/file/d/1xCuPXPQYc5LhFmOq3s9ZQMkcWGqC9T0E/view?usp=sharing"
             )],
             [InlineKeyboardButton(
-                text="✅ Ознакомлен",
+                text="✅ ОЗНАКОМЛЕН ✅",
                 callback_data="documents_accepted"
             )],
             [InlineKeyboardButton(text="← Назад", callback_data="back_main")],
