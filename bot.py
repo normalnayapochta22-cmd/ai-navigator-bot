@@ -533,12 +533,21 @@ async def check_payment_status(callback: CallbackQuery):
                 except:
                     pass
 
+            # Кнопка для входа в группу
+            join_keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🚀 Войти в клуб", url=config.CLUB_GROUP_LINK)],
+                    [InlineKeyboardButton(text="← В меню", callback_data="back_main")],
+                ]
+            )
+
             await callback.message.edit_text(
                 f"✅ <b>Оплата прошла успешно!</b>\n\n"
                 f"Тариф: {sub_name}\n"
                 f"Подписка активна до: {expiry_date}\n\n"
-                f"Добро пожаловать в клуб! 🎉",
-                reply_markup=get_main_keyboard(),
+                f"🎉 Добро пожаловать в клуб!\n\n"
+                f"Нажмите кнопку ниже, чтобы присоединиться к закрытой группе:",
+                reply_markup=join_keyboard,
                 parse_mode="HTML"
             )
             await callback.answer("Оплата подтверждена!")

@@ -14,7 +14,7 @@ YUKASSA_SHOP_ID = "1258598"
 YUKASSA_SECRET_KEY = "live_GzDIlnTfuL7FKls7TKKWc_1sjFFFPMBy6BbGwbZBDyw"
 
 # Ссылка на группу клуба
-CLUB_GROUP_LINK = os.getenv("CLUB_GROUP_LINK", "https://t.me/your_club_group")
+CLUB_GROUP_LINK = "https://t.me/+VKGe-NTkq1hkOTEy"
 
 # Цены
 PRICE_1_MONTH = 1990
