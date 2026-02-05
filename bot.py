@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -14,8 +15,13 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 
+from yookassa import Configuration, Payment
 from database import Database
 import config
+
+# Настройка ЮKassa
+Configuration.account_id = config.YUKASSA_SHOP_ID
+Configuration.secret_key = config.YUKASSA_SECRET_KEY
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -361,52 +367,195 @@ async def documents_accepted(callback: CallbackQuery):
 @router.callback_query(F.data == "pay_1month")
 async def process_payment_1month(callback: CallbackQuery):
     """Оплата 1 месяц"""
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Назад к тарифам", callback_data="documents_accepted")],
-            [InlineKeyboardButton(text="В главное меню", callback_data="back_main")],
-        ]
-    )
+    user = callback.from_user
 
-    await callback.message.edit_text(
-        f"""<b>Оплата — 1 месяц</b>
+    try:
+        # Создаём платёж в ЮKassa
+        payment = Payment.create({
+            "amount": {
+                "value": str(config.PRICE_1_MONTH) + ".00",
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/AInavigatorpulseofthefuture_bot"
+            },
+            "capture": True,
+            "description": f"AI Навигатор - подписка 1 месяц (ID: {user.id})",
+            "save_payment_method": True,
+            "metadata": {
+                "user_id": str(user.id),
+                "subscription_type": "1_month"
+            }
+        }, uuid.uuid4())
+
+        payment_url = payment.confirmation.confirmation_url
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
+                [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_payment_{payment.id}")],
+                [InlineKeyboardButton(text="← Назад", callback_data="documents_accepted")],
+            ]
+        )
+
+        await callback.message.edit_text(
+            f"""💳 <b>Оплата — 1 месяц</b>
 
 Стоимость: {config.PRICE_1_MONTH} руб.
 
-Для оплаты перейдите по ссылке:
-[Ссылка будет добавлена после настройки ЮKassa]
+Нажмите кнопку «Оплатить» для перехода на страницу оплаты.
+После оплаты нажмите «Я оплатил» для активации подписки.""",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка создания платежа: {e}")
+        await callback.message.edit_text(
+            "Произошла ошибка при создании платежа. Попробуйте позже.",
+            reply_markup=get_back_keyboard(),
+            parse_mode="HTML"
+        )
 
-После оплаты доступ активируется автоматически.""",
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
     await callback.answer()
 
 
 @router.callback_query(F.data == "pay_3months")
 async def process_payment_3months(callback: CallbackQuery):
     """Оплата 3 месяца"""
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Назад к тарифам", callback_data="documents_accepted")],
-            [InlineKeyboardButton(text="В главное меню", callback_data="back_main")],
-        ]
-    )
+    user = callback.from_user
 
-    await callback.message.edit_text(
-        f"""<b>Оплата — 3 месяца</b>
+    try:
+        # Создаём платёж в ЮKassa
+        payment = Payment.create({
+            "amount": {
+                "value": str(config.PRICE_3_MONTHS) + ".00",
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/AInavigatorpulseofthefuture_bot"
+            },
+            "capture": True,
+            "description": f"AI Навигатор - подписка 3 месяца (ID: {user.id})",
+            "save_payment_method": True,
+            "metadata": {
+                "user_id": str(user.id),
+                "subscription_type": "3_months"
+            }
+        }, uuid.uuid4())
+
+        payment_url = payment.confirmation.confirmation_url
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
+                [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_payment_{payment.id}")],
+                [InlineKeyboardButton(text="← Назад", callback_data="documents_accepted")],
+            ]
+        )
+
+        await callback.message.edit_text(
+            f"""💳 <b>Оплата — 3 месяца</b>
 
 Стоимость: {config.PRICE_3_MONTHS} руб.
 Выгода: 980 руб.
 
-Для оплаты перейдите по ссылке:
-[Ссылка будет добавлена после настройки ЮKassa]
+Нажмите кнопку «Оплатить» для перехода на страницу оплаты.
+После оплаты нажмите «Я оплатил» для активации подписки.""",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка создания платежа: {e}")
+        await callback.message.edit_text(
+            "Произошла ошибка при создании платежа. Попробуйте позже.",
+            reply_markup=get_back_keyboard(),
+            parse_mode="HTML"
+        )
 
-После оплаты доступ активируется автоматически.""",
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("check_payment_"))
+async def check_payment_status(callback: CallbackQuery):
+    """Проверка статуса оплаты"""
+    payment_id = callback.data.replace("check_payment_", "")
+    user = callback.from_user
+
+    try:
+        # Проверяем статус платежа
+        payment = Payment.find_one(payment_id)
+
+        if payment.status == "succeeded":
+            # Платёж успешен
+            metadata = payment.metadata
+            subscription_type = metadata.get("subscription_type", "1_month")
+
+            # Рассчитываем дату окончания подписки
+            if subscription_type == "3_months":
+                expiry_date = (datetime.now() + timedelta(days=90)).strftime("%d.%m.%Y")
+                sub_name = "3 месяца"
+                amount = config.PRICE_3_MONTHS
+            else:
+                expiry_date = (datetime.now() + timedelta(days=30)).strftime("%d.%m.%Y")
+                sub_name = "1 месяц"
+                amount = config.PRICE_1_MONTH
+
+            # Сохраняем токен карты если есть
+            if payment.payment_method and payment.payment_method.saved:
+                card_last4 = payment.payment_method.card.last4 if payment.payment_method.card else "0000"
+                await db.save_payment_token(user.id, payment.payment_method.id, card_last4)
+
+            # Обновляем статус пользователя
+            await db.mark_user_paid(user.id, subscription_type, expiry_date)
+
+            # Сохраняем платёж
+            await db.add_payment(user.id, amount, subscription_type, "succeeded", payment_id)
+
+            # Уведомляем админов
+            for admin_id in config.ADMIN_IDS:
+                try:
+                    await bot.send_message(
+                        admin_id,
+                        f"💰 <b>Новая оплата!</b>\n\n"
+                        f"Пользователь: {user.full_name}\n"
+                        f"Username: @{user.username or 'не указан'}\n"
+                        f"Тариф: {sub_name}\n"
+                        f"Сумма: {amount} руб.\n"
+                        f"Активен до: {expiry_date}",
+                        parse_mode="HTML"
+                    )
+                except:
+                    pass
+
+            await callback.message.edit_text(
+                f"✅ <b>Оплата прошла успешно!</b>\n\n"
+                f"Тариф: {sub_name}\n"
+                f"Подписка активна до: {expiry_date}\n\n"
+                f"Добро пожаловать в клуб! 🎉",
+                reply_markup=get_main_keyboard(),
+                parse_mode="HTML"
+            )
+            await callback.answer("Оплата подтверждена!")
+
+        elif payment.status == "pending":
+            await callback.answer("⏳ Платёж ещё обрабатывается. Подождите немного и попробуйте снова.", show_alert=True)
+
+        elif payment.status == "canceled":
+            await callback.message.edit_text(
+                "❌ <b>Платёж отменён</b>\n\nПопробуйте оплатить снова.",
+                reply_markup=get_back_keyboard(),
+                parse_mode="HTML"
+            )
+            await callback.answer()
+
+        else:
+            await callback.answer(f"Статус платежа: {payment.status}", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Ошибка проверки платежа: {e}")
+        await callback.answer("Ошибка проверки платежа. Попробуйте позже.", show_alert=True)
 
 
 @router.callback_query(F.data == "profile")

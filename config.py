@@ -9,9 +9,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8203221474:AAGWWVpf2XCwdP3Vyvhjy0p_tTqm6iLdv
 # Admin user IDs
 ADMIN_IDS = [590597992, 554519803]  # Софья Маковень, Анна Алпатова
 
-# ЮKassa настройки (добавите позже)
-YUKASSA_SHOP_ID = os.getenv("YUKASSA_SHOP_ID", "")
-YUKASSA_SECRET_KEY = os.getenv("YUKASSA_SECRET_KEY", "")
+# ЮKassa настройки
+YUKASSA_SHOP_ID = "1258598"
+YUKASSA_SECRET_KEY = "live_GzDIlnTfuL7FKls7TKKWc_1sjFFFPMBy6BbGwbZBDyw"
 
 # Ссылка на группу клуба
 CLUB_GROUP_LINK = os.getenv("CLUB_GROUP_LINK", "https://t.me/your_club_group")
