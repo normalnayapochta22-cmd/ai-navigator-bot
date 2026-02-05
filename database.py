@@ -53,6 +53,16 @@ class Database:
                 )
             """)
 
+            # Миграция: добавляем колонки для токена карты
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN payment_token TEXT")
+            except:
+                pass  # Колонка уже существует
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN card_last4 TEXT")
+            except:
+                pass  # Колонка уже существует
+
             await db.commit()
 
     async def add_user(self, user_id: int, username: str, full_name: str) -> bool:
@@ -184,3 +194,31 @@ class Database:
             """) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    async def save_payment_token(self, user_id: int, payment_token: str, card_last4: str):
+        """Сохранить токен карты для автоплатежей"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE users SET payment_token = ?, card_last4 = ? WHERE user_id = ?
+            """, (payment_token, card_last4, user_id))
+            await db.commit()
+
+    async def delete_payment_token(self, user_id: int):
+        """Удалить токен карты (отвязать карту)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE users SET payment_token = NULL, card_last4 = NULL WHERE user_id = ?
+            """, (user_id,))
+            await db.commit()
+
+    async def get_payment_token(self, user_id: int) -> Optional[Dict]:
+        """Получить токен карты пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT payment_token, card_last4 FROM users WHERE user_id = ?
+            """, (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row and row['payment_token']:
+                    return {'payment_token': row['payment_token'], 'card_last4': row['card_last4']}
+                return None

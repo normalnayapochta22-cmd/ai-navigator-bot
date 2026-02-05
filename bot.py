@@ -408,6 +408,13 @@ async def my_profile(callback: CallbackQuery):
     expiry = user_data["payment_expiry"] or "—"
     email = user_data["email"] or "Не указан"
 
+    # Проверяем, есть ли привязанная карта
+    card_info = await db.get_payment_token(callback.from_user.id)
+    if card_info:
+        card_text = f"💳 Карта: •••• {card_info['card_last4']}"
+    else:
+        card_text = "💳 Карта: не привязана"
+
     profile_text = f"""👤 <b>Ваш профиль</b>
 
 • Имя: {user_data['full_name']}
@@ -415,11 +422,54 @@ async def my_profile(callback: CallbackQuery):
 • Email: {email}
 • Подписка: {status}
 • Активна до: {expiry}
+• {card_text}
 
 Для изменения данных — задайте вопрос в поддержку."""
 
-    await callback.message.edit_text(profile_text, reply_markup=get_back_keyboard(), parse_mode="HTML")
+    # Создаём клавиатуру с кнопкой отвязки карты если карта привязана
+    buttons = []
+    if card_info:
+        buttons.append([InlineKeyboardButton(text="🗑 Отвязать карту", callback_data="unlink_card")])
+    buttons.append([InlineKeyboardButton(text="← Назад в меню", callback_data="back_main")])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(profile_text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "unlink_card")
+async def unlink_card_confirm(callback: CallbackQuery):
+    """Подтверждение отвязки карты"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, отвязать", callback_data="unlink_card_confirm")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="profile")],
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🗑 <b>Отвязать карту?</b>\n\n"
+        "Данные вашей карты будут удалены. "
+        "Для следующей оплаты потребуется ввести данные заново.",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "unlink_card_confirm")
+async def unlink_card_execute(callback: CallbackQuery):
+    """Выполнение отвязки карты"""
+    await db.delete_payment_token(callback.from_user.id)
+
+    await callback.message.edit_text(
+        "✅ <b>Карта отвязана</b>\n\n"
+        "Данные вашей карты успешно удалены из системы.",
+        reply_markup=get_back_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer("Карта отвязана!")
 
 
 @router.callback_query(F.data == "ask_question")
