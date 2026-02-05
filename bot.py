@@ -382,7 +382,6 @@ async def process_payment_1month(callback: CallbackQuery):
             },
             "capture": True,
             "description": f"AI Навигатор - подписка 1 месяц (ID: {user.id})",
-            "save_payment_method": True,
             "metadata": {
                 "user_id": str(user.id),
                 "subscription_type": "1_month"
@@ -438,7 +437,6 @@ async def process_payment_3months(callback: CallbackQuery):
             },
             "capture": True,
             "description": f"AI Навигатор - подписка 3 месяца (ID: {user.id})",
-            "save_payment_method": True,
             "metadata": {
                 "user_id": str(user.id),
                 "subscription_type": "3_months"
