@@ -410,8 +410,11 @@ async def process_payment_1month(callback: CallbackQuery):
         )
     except Exception as e:
         logger.error(f"Ошибка создания платежа: {e}")
+        logger.error(f"Тип ошибки: {type(e)}")
+        if hasattr(e, 'response'):
+            logger.error(f"Ответ API: {e.response.text if hasattr(e.response, 'text') else e.response}")
         await callback.message.edit_text(
-            "Произошла ошибка при создании платежа. Попробуйте позже.",
+            f"Ошибка платежа: {str(e)[:300]}",
             reply_markup=get_back_keyboard(),
             parse_mode="HTML"
         )
@@ -466,8 +469,11 @@ async def process_payment_3months(callback: CallbackQuery):
         )
     except Exception as e:
         logger.error(f"Ошибка создания платежа: {e}")
+        logger.error(f"Тип ошибки: {type(e)}")
+        if hasattr(e, 'response'):
+            logger.error(f"Ответ API: {e.response.text if hasattr(e.response, 'text') else e.response}")
         await callback.message.edit_text(
-            "Произошла ошибка при создании платежа. Попробуйте позже.",
+            f"Ошибка платежа: {str(e)[:300]}",
             reply_markup=get_back_keyboard(),
             parse_mode="HTML"
         )
