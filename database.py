@@ -1,224 +1,192 @@
-import aiosqlite
-import json
+import asyncpg
 from datetime import datetime
 from typing import Optional, List, Dict
 
+import config
+
 
 class Database:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self):
+        self.pool = None
 
     async def init_db(self):
         """Инициализация базы данных"""
-        async with aiosqlite.connect(self.db_path) as db:
+        self.pool = await asyncpg.create_pool(config.DATABASE_URL)
+
+        async with self.pool.acquire() as conn:
             # Таблица пользователей
-            await db.execute("""
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id BIGINT PRIMARY KEY,
                     username TEXT,
                     full_name TEXT,
                     email TEXT,
                     phone TEXT,
                     registration_date TEXT,
-                    is_paid BOOLEAN DEFAULT 0,
+                    is_paid BOOLEAN DEFAULT FALSE,
                     payment_expiry TEXT,
-                    subscription_type TEXT
+                    subscription_type TEXT,
+                    payment_token TEXT,
+                    card_last4 TEXT
                 )
             """)
 
             # Таблица платежей
-            await db.execute("""
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS payments (
-                    payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    payment_id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
                     amount INTEGER,
                     subscription_type TEXT,
                     payment_date TEXT,
                     payment_status TEXT,
-                    yukassa_payment_id TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    yukassa_payment_id TEXT
                 )
             """)
 
-            # Таблица сообщений (для переписки)
-            await db.execute("""
+            # Таблица сообщений
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
-                    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    message_id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
                     username TEXT,
                     message_text TEXT,
                     timestamp TEXT,
-                    is_from_admin BOOLEAN DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    is_from_admin BOOLEAN DEFAULT FALSE
                 )
             """)
 
-            # Миграция: добавляем колонки для токена карты
-            try:
-                await db.execute("ALTER TABLE users ADD COLUMN payment_token TEXT")
-            except:
-                pass  # Колонка уже существует
-            try:
-                await db.execute("ALTER TABLE users ADD COLUMN card_last4 TEXT")
-            except:
-                pass  # Колонка уже существует
-
-            await db.commit()
-
     async def add_user(self, user_id: int, username: str, full_name: str) -> bool:
         """Добавить нового пользователя. Возвращает True если пользователь новый."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with self.pool.acquire() as conn:
             # Проверяем, существует ли пользователь
-            async with db.execute("""
-                SELECT user_id FROM users WHERE user_id = ?
-            """, (user_id,)) as cursor:
-                existing = await cursor.fetchone()
+            existing = await conn.fetchrow(
+                "SELECT user_id FROM users WHERE user_id = $1", user_id
+            )
 
             if existing:
-                return False  # Пользователь уже существует
+                return False
 
             # Добавляем нового пользователя
-            await db.execute("""
+            await conn.execute("""
                 INSERT INTO users (user_id, username, full_name, registration_date)
-                VALUES (?, ?, ?, ?)
-            """, (user_id, username, full_name, datetime.now().isoformat()))
-            await db.commit()
-            return True  # Новый пользователь
+                VALUES ($1, $2, $3, $4)
+            """, user_id, username, full_name, datetime.now().isoformat())
+            return True
 
     async def update_user_email(self, user_id: int, email: str):
         """Обновить email пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE users SET email = ? WHERE user_id = ?
-            """, (email, user_id))
-            await db.commit()
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET email = $1 WHERE user_id = $2", email, user_id
+            )
 
     async def update_user_phone(self, user_id: int, phone: str):
         """Обновить телефон пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE users SET phone = ? WHERE user_id = ?
-            """, (phone, user_id))
-            await db.commit()
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET phone = $1 WHERE user_id = $2", phone, user_id
+            )
 
     async def get_user(self, user_id: int) -> Optional[Dict]:
         """Получить данные пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM users WHERE user_id = ?
-            """, (user_id,)) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return dict(row)
-                return None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM users WHERE user_id = $1", user_id
+            )
+            if row:
+                return dict(row)
+            return None
 
     async def mark_user_paid(self, user_id: int, subscription_type: str, expiry_date: str):
         """Отметить пользователя как оплатившего"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
                 UPDATE users
-                SET is_paid = 1, subscription_type = ?, payment_expiry = ?
-                WHERE user_id = ?
-            """, (subscription_type, expiry_date, user_id))
-            await db.commit()
+                SET is_paid = TRUE, subscription_type = $1, payment_expiry = $2
+                WHERE user_id = $3
+            """, subscription_type, expiry_date, user_id)
 
     async def add_payment(self, user_id: int, amount: int, subscription_type: str,
                          payment_status: str, yukassa_payment_id: str = ""):
         """Добавить запись о платеже"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
                 INSERT INTO payments (user_id, amount, subscription_type, payment_date,
                                     payment_status, yukassa_payment_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, amount, subscription_type, datetime.now().isoformat(),
-                  payment_status, yukassa_payment_id))
-            await db.commit()
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """, user_id, amount, subscription_type, datetime.now().isoformat(),
+                  payment_status, yukassa_payment_id)
 
     async def add_message(self, user_id: int, username: str, message_text: str,
                          is_from_admin: bool = False):
         """Сохранить сообщение в историю"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
                 INSERT INTO messages (user_id, username, message_text, timestamp, is_from_admin)
-                VALUES (?, ?, ?, ?, ?)
-            """, (user_id, username, message_text, datetime.now().isoformat(), is_from_admin))
-            await db.commit()
+                VALUES ($1, $2, $3, $4, $5)
+            """, user_id, username, message_text, datetime.now().isoformat(), is_from_admin)
 
     async def get_all_users(self) -> List[Dict]:
         """Получить всех пользователей"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM users ORDER BY registration_date DESC
-            """) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM users ORDER BY registration_date DESC"
+            )
+            return [dict(row) for row in rows]
 
     async def get_paid_users(self) -> List[Dict]:
         """Получить только оплативших пользователей"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM users WHERE is_paid = 1 ORDER BY payment_expiry DESC
-            """) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM users WHERE is_paid = TRUE ORDER BY payment_expiry DESC"
+            )
+            return [dict(row) for row in rows]
 
     async def get_user_messages(self, user_id: int) -> List[Dict]:
         """Получить переписку с пользователем"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM messages WHERE user_id = ? ORDER BY timestamp ASC
-            """, (user_id,)) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM messages WHERE user_id = $1 ORDER BY timestamp ASC", user_id
+            )
+            return [dict(row) for row in rows]
 
     async def get_all_messages(self) -> List[Dict]:
         """Получить все сообщения"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM messages ORDER BY timestamp DESC LIMIT 100
-            """) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM messages ORDER BY timestamp DESC LIMIT 100"
+            )
+            return [dict(row) for row in rows]
 
     async def get_unpaid_users(self) -> List[Dict]:
         """Получить пользователей, которые не оплатили"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM users WHERE is_paid = 0 ORDER BY registration_date DESC
-            """) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM users WHERE is_paid = FALSE ORDER BY registration_date DESC"
+            )
+            return [dict(row) for row in rows]
 
     async def save_payment_token(self, user_id: int, payment_token: str, card_last4: str):
         """Сохранить токен карты для автоплатежей"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE users SET payment_token = ?, card_last4 = ? WHERE user_id = ?
-            """, (payment_token, card_last4, user_id))
-            await db.commit()
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE users SET payment_token = $1, card_last4 = $2 WHERE user_id = $3
+            """, payment_token, card_last4, user_id)
 
     async def delete_payment_token(self, user_id: int):
         """Удалить токен карты (отвязать карту)"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE users SET payment_token = NULL, card_last4 = NULL WHERE user_id = ?
-            """, (user_id,))
-            await db.commit()
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE users SET payment_token = NULL, card_last4 = NULL WHERE user_id = $1
+            """, user_id)
 
     async def get_payment_token(self, user_id: int) -> Optional[Dict]:
         """Получить токен карты пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT payment_token, card_last4 FROM users WHERE user_id = ?
-            """, (user_id,)) as cursor:
-                row = await cursor.fetchone()
-                if row and row['payment_token']:
-                    return {'payment_token': row['payment_token'], 'card_last4': row['card_last4']}
-                return None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT payment_token, card_last4 FROM users WHERE user_id = $1", user_id
+            )
+            if row and row['payment_token']:
+                return {'payment_token': row['payment_token'], 'card_last4': row['card_last4']}
+            return None

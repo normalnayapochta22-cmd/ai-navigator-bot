@@ -20,8 +20,8 @@ CLUB_GROUP_LINK = os.getenv("CLUB_GROUP_LINK", "https://t.me/your_club_group")
 PRICE_1_MONTH = 1990
 PRICE_3_MONTHS = 4990
 
-# База данных
-DATABASE_PATH = "bot_database.db"
+# База данных PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:QCycHWqIdMXCVzyLPsxPxcAqDhysAEgK@postgres.railway.internal:5432/railway")
 
 # Информация о клубе
 CLUB_INFO = """

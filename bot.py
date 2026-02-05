@@ -26,7 +26,7 @@ bot = Bot(token=config.BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
-db = Database(config.DATABASE_PATH)
+db = Database()
 
 
 # Состояния для FSM
