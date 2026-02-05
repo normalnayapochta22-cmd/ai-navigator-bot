@@ -7,7 +7,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8203221474:AAGWWVpf2XCwdP3Vyvhjy0p_tTqm6iLdvuU")
 
 # Admin user IDs
-ADMIN_IDS = [554519803]  # Анна Алпатова
+ADMIN_IDS = [590597992, 554519803]  # Софья Маковень, Анна Алпатова
 
 # ЮKassa настройки (добавите позже)
 YUKASSA_SHOP_ID = os.getenv("YUKASSA_SHOP_ID", "")
