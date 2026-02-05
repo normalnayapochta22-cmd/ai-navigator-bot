@@ -213,6 +213,24 @@ async def cmd_admin(message: Message):
     )
 
 
+@router.message(Command("testcard"))
+async def cmd_testcard(message: Message):
+    """Добавить тестовую карту для скриншотов (только для админов)"""
+    if message.from_user.id not in config.ADMIN_IDS:
+        return
+
+    # Добавляем тестовую карту
+    await db.save_payment_token(message.from_user.id, "test_token_12345", "4242")
+
+    await message.answer(
+        "✅ Тестовая карта добавлена!\n\n"
+        "Теперь зайди в «👤 Мой профиль» — там будет карта •••• 4242 и кнопка отвязки.\n\n"
+        "После скриншотов можешь отвязать карту.",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
+
+
 # Callback обработчики главного меню
 @router.callback_query(F.data == "back_main")
 async def back_to_main(callback: CallbackQuery, state: FSMContext):
