@@ -21,7 +21,7 @@ PRICE_1_MONTH = 1990
 PRICE_3_MONTHS = 4990
 
 # База данных PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:QCycHWqIdMXCVzyLPsxPxcAqDhysAEgK@postgres.railway.internal:5432/railway")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:QCycHWqIdMXCVzyLPsxPxcAqDhysAEgK@switchyard.proxy.rlwy.net:15637/railway")
 
 # Информация о клубе
 CLUB_INFO = """
