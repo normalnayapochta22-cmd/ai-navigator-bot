@@ -6,8 +6,8 @@ load_dotenv()
 # Telegram Bot Token
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8203221474:AAGWWVpf2XCwdP3Vyvhjy0p_tTqm6iLdvuU")
 
-# Admin user IDs (добавьте свой Telegram ID)
-ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
+# Admin user IDs
+ADMIN_IDS = [554519803]  # Анна Алпатова
 
 # ЮKassa настройки (добавите позже)
 YUKASSA_SHOP_ID = os.getenv("YUKASSA_SHOP_ID", "")
