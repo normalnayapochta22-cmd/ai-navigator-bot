@@ -479,7 +479,29 @@ async def unlink_card_confirm(callback: CallbackQuery):
 @router.callback_query(F.data == "unlink_card_confirm")
 async def unlink_card_execute(callback: CallbackQuery):
     """Выполнение отвязки карты"""
-    await db.delete_payment_token(callback.from_user.id)
+    user = callback.from_user
+
+    # Получаем инфо о карте перед удалением
+    card_info = await db.get_payment_token(user.id)
+    card_last4 = card_info['card_last4'] if card_info else "????"
+
+    # Удаляем токен
+    await db.delete_payment_token(user.id)
+
+    # Уведомляем админов
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🗑 <b>Карта отвязана</b>\n\n"
+                f"Пользователь: {user.full_name}\n"
+                f"Username: @{user.username or 'не указан'}\n"
+                f"ID: {user.id}\n"
+                f"Карта: •••• {card_last4}",
+                parse_mode="HTML"
+            )
+        except:
+            pass
 
     await callback.message.edit_text(
         "✅ <b>Карта отвязана</b>\n\n"
