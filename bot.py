@@ -359,15 +359,17 @@ async def documents_accepted(callback: CallbackQuery):
     """Пользователь ознакомился с документами"""
     payment_text = """💳 <b>Выберите тариф</b>
 
-🔹 <b>1 месяц — 1990 руб.</b>
+🔹 <b>1 месяц — 1990 руб./мес</b>
 • 8 уроков в месяц
 • Готовые базы промтов
 • Живые эфиры
 
-⭐ <b>3 месяца — 4990 руб.</b>
+⭐ <b>3 месяца — 4990 руб. каждые 3 мес</b>
 • Всё из месячного тарифа
 • Выгода 980 руб.
 • Доступ на 3 месяца
+
+🔄 <i>Это подписка с автопродлением. Следующий платёж произойдёт автоматически. Отменить можно в любой момент в профиле.</i>
 
 Цены актуальны до 1 марта."""
 
@@ -381,7 +383,7 @@ async def process_payment_1month(callback: CallbackQuery):
     user = callback.from_user
 
     try:
-        # Создаём платёж в ЮKassa
+        # Создаём платёж в ЮKassa с сохранением карты для автоплатежей
         payment = Payment.create({
             "amount": {
                 "value": str(config.PRICE_1_MONTH) + ".00",
@@ -392,6 +394,7 @@ async def process_payment_1month(callback: CallbackQuery):
                 "return_url": "https://t.me/AInavigatorpulseofthefuture_bot"
             },
             "capture": True,
+            "save_payment_method": "true",
             "description": f"AI Навигатор - подписка 1 месяц (ID: {user.id})",
             "metadata": {
                 "user_id": str(user.id),
@@ -412,10 +415,13 @@ async def process_payment_1month(callback: CallbackQuery):
         await callback.message.edit_text(
             f"""💳 <b>Оплата — 1 месяц</b>
 
-Стоимость: {config.PRICE_1_MONTH} руб.
+Стоимость: {config.PRICE_1_MONTH} руб./мес
 
-Нажмите кнопку «Оплатить» для перехода на страницу оплаты.
-После оплаты нажмите «Я оплатил» для активации подписки.""",
+🔄 <b>Это подписка.</b> Следующий платёж ({config.PRICE_1_MONTH} руб.) произойдёт автоматически через 30 дней.
+
+Отменить подписку можно в любой момент в разделе «👤 Мой профиль».
+
+Нажмите «Оплатить» для перехода на страницу оплаты.""",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -439,7 +445,7 @@ async def process_payment_3months(callback: CallbackQuery):
     user = callback.from_user
 
     try:
-        # Создаём платёж в ЮKassa
+        # Создаём платёж в ЮKassa с сохранением карты для автоплатежей
         payment = Payment.create({
             "amount": {
                 "value": str(config.PRICE_3_MONTHS) + ".00",
@@ -450,6 +456,7 @@ async def process_payment_3months(callback: CallbackQuery):
                 "return_url": "https://t.me/AInavigatorpulseofthefuture_bot"
             },
             "capture": True,
+            "save_payment_method": "true",
             "description": f"AI Навигатор - подписка 3 месяца (ID: {user.id})",
             "metadata": {
                 "user_id": str(user.id),
@@ -470,11 +477,13 @@ async def process_payment_3months(callback: CallbackQuery):
         await callback.message.edit_text(
             f"""💳 <b>Оплата — 3 месяца</b>
 
-Стоимость: {config.PRICE_3_MONTHS} руб.
-Выгода: 980 руб.
+Стоимость: {config.PRICE_3_MONTHS} руб. (выгода 980 руб.)
 
-Нажмите кнопку «Оплатить» для перехода на страницу оплаты.
-После оплаты нажмите «Я оплатил» для активации подписки.""",
+🔄 <b>Это подписка.</b> Следующий платёж ({config.PRICE_3_MONTHS} руб.) произойдёт автоматически через 3 месяца.
+
+Отменить подписку можно в любой момент в разделе «👤 Мой профиль».
+
+Нажмите «Оплатить» для перехода на страницу оплаты.""",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -556,8 +565,10 @@ async def check_payment_status(callback: CallbackQuery):
                 f"✅ <b>Оплата прошла успешно!</b>\n\n"
                 f"Тариф: {sub_name}\n"
                 f"Подписка активна до: {expiry_date}\n\n"
+                f"🔄 Следующий платёж произойдёт автоматически.\n"
+                f"Отменить подписку можно в любой момент в «👤 Мой профиль».\n\n"
                 f"🎉 Добро пожаловать в клуб!\n\n"
-                f"Нажмите кнопку ниже, чтобы присоединиться к закрытой группе:",
+                f"Нажмите кнопку ниже, чтобы присоединиться:",
                 reply_markup=join_keyboard,
                 parse_mode="HTML"
             )
@@ -606,6 +617,13 @@ async def my_profile(callback: CallbackQuery):
     else:
         card_text = "💳 Карта: не привязана"
 
+    # Проверяем статус автопродления
+    auto_renewal = await db.get_auto_renewal_status(callback.from_user.id)
+    if card_info:
+        auto_renewal_text = "✅ Включено" if auto_renewal else "❌ Отключено"
+    else:
+        auto_renewal_text = "— (нет карты)"
+
     profile_text = f"""👤 <b>Ваш профиль</b>
 
 • Имя: {user_data['full_name']}
@@ -614,13 +632,22 @@ async def my_profile(callback: CallbackQuery):
 • Подписка: {status}
 • Активна до: {expiry}
 • {card_text}
+• Автопродление: {auto_renewal_text}
 
 Для изменения данных — задайте вопрос в поддержку."""
 
-    # Создаём клавиатуру с кнопкой отвязки карты если карта привязана
+    # Создаём клавиатуру
     buttons = []
     if card_info:
+        # Кнопка включения/отключения автопродления
+        if auto_renewal:
+            buttons.append([InlineKeyboardButton(text="🔕 Отключить автопродление", callback_data="toggle_auto_renewal_off")])
+        else:
+            buttons.append([InlineKeyboardButton(text="🔔 Включить автопродление", callback_data="toggle_auto_renewal_on")])
         buttons.append([InlineKeyboardButton(text="🗑 Отвязать карту", callback_data="unlink_card")])
+    # Кнопка отмены подписки (если есть активная подписка)
+    if user_data["is_paid"]:
+        buttons.append([InlineKeyboardButton(text="❌ Отменить подписку", callback_data="cancel_subscription")])
     buttons.append([InlineKeyboardButton(text="← Назад в меню", callback_data="back_main")])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -683,6 +710,142 @@ async def unlink_card_execute(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer("Карта отвязана!")
+
+
+@router.callback_query(F.data == "toggle_auto_renewal_off")
+async def toggle_auto_renewal_off(callback: CallbackQuery):
+    """Отключение автопродления"""
+    user = callback.from_user
+
+    await db.set_auto_renewal(user.id, False)
+
+    # Уведомляем админов
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🔕 <b>Автопродление отключено</b>\n\n"
+                f"Пользователь: {user.full_name}\n"
+                f"Username: @{user.username or 'не указан'}\n"
+                f"ID: {user.id}",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
+    await callback.message.edit_text(
+        "🔕 <b>Автопродление отключено</b>\n\n"
+        "Автоматическое списание отключено.\n"
+        "Не забудьте продлить подписку вручную до её окончания.",
+        reply_markup=get_back_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer("Автопродление отключено")
+
+
+@router.callback_query(F.data == "toggle_auto_renewal_on")
+async def toggle_auto_renewal_on(callback: CallbackQuery):
+    """Включение автопродления"""
+    user = callback.from_user
+
+    await db.set_auto_renewal(user.id, True)
+
+    # Уведомляем админов
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"🔔 <b>Автопродление включено</b>\n\n"
+                f"Пользователь: {user.full_name}\n"
+                f"Username: @{user.username or 'не указан'}\n"
+                f"ID: {user.id}",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
+    await callback.message.edit_text(
+        "🔔 <b>Автопродление включено</b>\n\n"
+        "Подписка будет автоматически продлеваться.\n"
+        "За 3 дня до окончания вы получите уведомление о предстоящем списании.",
+        reply_markup=get_back_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer("Автопродление включено")
+
+
+@router.callback_query(F.data == "cancel_subscription")
+async def cancel_subscription_confirm(callback: CallbackQuery):
+    """Подтверждение отмены подписки"""
+    user_data = await db.get_user(callback.from_user.id)
+    expiry = user_data["payment_expiry"] if user_data else "—"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, отменить", callback_data="cancel_subscription_confirm")],
+            [InlineKeyboardButton(text="❌ Нет, оставить", callback_data="profile")],
+        ]
+    )
+
+    await callback.message.edit_text(
+        f"❌ <b>Отменить подписку?</b>\n\n"
+        f"Ваша подписка будет активна до {expiry}.\n"
+        f"После этой даты доступ к материалам будет закрыт.\n\n"
+        f"Также будут отключены:\n"
+        f"• Автопродление\n"
+        f"• Привязанная карта\n\n"
+        f"Вы уверены?",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "cancel_subscription_confirm")
+async def cancel_subscription_execute(callback: CallbackQuery):
+    """Выполнение отмены подписки"""
+    user = callback.from_user
+    user_data = await db.get_user(user.id)
+    expiry = user_data["payment_expiry"] if user_data else "—"
+
+    # Получаем инфо о карте перед удалением
+    card_info = await db.get_payment_token(user.id)
+    card_last4 = card_info['card_last4'] if card_info else None
+
+    # Отключаем автопродление
+    await db.set_auto_renewal(user.id, False)
+
+    # Отвязываем карту если есть
+    if card_info:
+        await db.delete_payment_token(user.id)
+
+    # Уведомляем админов
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"❌ <b>Подписка отменена</b>\n\n"
+                f"Пользователь: {user.full_name}\n"
+                f"Username: @{user.username or 'не указан'}\n"
+                f"ID: {user.id}\n"
+                f"Подписка активна до: {expiry}\n"
+                f"Карта: {'•••• ' + card_last4 if card_last4 else 'не была привязана'}",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
+    await callback.message.edit_text(
+        f"❌ <b>Подписка отменена</b>\n\n"
+        f"Ваша подписка будет активна до {expiry}.\n"
+        f"После этой даты доступ будет закрыт.\n\n"
+        f"Автопродление отключено.\n"
+        f"{'Карта отвязана.' if card_last4 else ''}\n\n"
+        f"Вы всегда можете оформить подписку заново через «💳 Оплатить доступ».",
+        reply_markup=get_back_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer("Подписка отменена")
 
 
 @router.callback_query(F.data == "ask_question")
@@ -1002,6 +1165,188 @@ async def handle_user_message(message: Message, state: FSMContext):
     )
 
 
+async def auto_renew_subscription(user_id: int, username: str, full_name: str, subscription_type: str) -> bool:
+    """
+    Автоматическое продление подписки через сохранённую карту.
+    Продлевает по тому же тарифу, что был у пользователя.
+    Возвращает True при успехе, False при ошибке.
+    """
+    try:
+        # Получаем токен карты
+        card_info = await db.get_payment_token(user_id)
+        if not card_info:
+            logger.warning(f"Нет токена карты для пользователя {user_id}")
+            return False
+
+        payment_token = card_info['payment_token']
+
+        # Определяем сумму и срок в зависимости от типа подписки
+        if subscription_type == "3_months":
+            amount = config.PRICE_3_MONTHS
+            days = 90
+            sub_name = "3 месяца"
+            sub_type_auto = "3_months_auto"
+        else:
+            amount = config.PRICE_1_MONTH
+            days = 30
+            sub_name = "1 месяц"
+            sub_type_auto = "1_month_auto"
+
+        # Создаём автоплатёж через ЮKassa
+        payment = Payment.create({
+            "amount": {
+                "value": str(amount) + ".00",
+                "currency": "RUB"
+            },
+            "capture": True,
+            "payment_method_id": payment_token,
+            "description": f"AI Навигатор - автопродление подписки {sub_name} (ID: {user_id})",
+            "metadata": {
+                "user_id": str(user_id),
+                "subscription_type": subscription_type,
+                "auto_renewal": "true"
+            }
+        }, uuid.uuid4())
+
+        # Проверяем статус платежа
+        if payment.status == "succeeded":
+            # Продлеваем подписку
+            await db.extend_subscription(user_id, days)
+
+            # Получаем новую дату окончания
+            user_data = await db.get_user(user_id)
+            new_expiry = user_data['payment_expiry'] if user_data else "неизвестно"
+
+            # Сохраняем платёж
+            await db.add_payment(user_id, amount, sub_type_auto, "succeeded", payment.id)
+
+            # Уведомляем пользователя
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"✅ <b>Подписка автоматически продлена!</b>\n\n"
+                    f"Тариф: {sub_name}\n"
+                    f"С вашей карты списано {amount} руб.\n"
+                    f"Подписка активна до: {new_expiry}\n\n"
+                    f"Для отключения автопродления перейдите в «👤 Мой профиль».",
+                    parse_mode="HTML",
+                    reply_markup=get_main_keyboard()
+                )
+            except Exception as e:
+                logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+
+            # Уведомляем админов
+            for admin_id in config.ADMIN_IDS:
+                try:
+                    await bot.send_message(
+                        admin_id,
+                        f"🔄 <b>Автопродление подписки</b>\n\n"
+                        f"Пользователь: {full_name}\n"
+                        f"Username: @{username or 'не указан'}\n"
+                        f"Тариф: {sub_name}\n"
+                        f"Сумма: {amount} руб.\n"
+                        f"Новая дата окончания: {new_expiry}",
+                        parse_mode="HTML"
+                    )
+                except:
+                    pass
+
+            logger.info(f"Автопродление успешно для пользователя {user_id}, тариф {sub_name}")
+            return True
+
+        elif payment.status == "pending":
+            # Платёж ещё обрабатывается - это редко для автоплатежей
+            logger.info(f"Автоплатёж pending для пользователя {user_id}")
+            return False
+
+        else:
+            # Платёж не прошёл
+            logger.warning(f"Автоплатёж не прошёл для пользователя {user_id}: статус {payment.status}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Ошибка автопродления для пользователя {user_id}: {e}")
+        return False
+
+
+async def check_expiring_subscriptions():
+    """Фоновая задача для проверки истекающих подписок"""
+    while True:
+        try:
+            logger.info("Проверка истекающих подписок...")
+
+            # 1. Уведомления за 3 дня до окончания
+            users_expiring_soon = await db.get_users_expiring_soon(days=3)
+            for user in users_expiring_soon:
+                # Определяем сумму в зависимости от типа подписки
+                if user.get('subscription_type') == "3_months":
+                    amount = config.PRICE_3_MONTHS
+                    period = "3 месяца"
+                else:
+                    amount = config.PRICE_1_MONTH
+                    period = "1 месяц"
+
+                try:
+                    await bot.send_message(
+                        user['user_id'],
+                        f"⏰ <b>Напоминание о подписке</b>\n\n"
+                        f"Через 3 дня с вашей карты •••• {user['card_last4']} будет списано {amount} руб. "
+                        f"для продления подписки ({period}).\n\n"
+                        f"Если вы хотите отключить автопродление, сделайте это в разделе «👤 Мой профиль».",
+                        parse_mode="HTML",
+                        reply_markup=get_main_keyboard()
+                    )
+                    logger.info(f"Отправлено уведомление о скором списании пользователю {user['user_id']}")
+                except Exception as e:
+                    logger.error(f"Не удалось отправить напоминание пользователю {user['user_id']}: {e}")
+
+            # 2. Автопродление подписок, истекающих сегодня
+            users_expiring_today = await db.get_users_expiring_today()
+            for user in users_expiring_today:
+                success = await auto_renew_subscription(
+                    user['user_id'],
+                    user['username'],
+                    user['full_name'],
+                    user.get('subscription_type', '1_month')
+                )
+
+                if not success:
+                    # Уведомляем пользователя об ошибке
+                    try:
+                        await bot.send_message(
+                            user['user_id'],
+                            f"❌ <b>Не удалось продлить подписку</b>\n\n"
+                            f"Автоматическое списание не прошло.\n"
+                            f"Пожалуйста, продлите подписку вручную через «💳 Оплатить доступ».",
+                            parse_mode="HTML",
+                            reply_markup=get_main_keyboard()
+                        )
+                    except Exception as e:
+                        logger.error(f"Не удалось уведомить пользователя {user['user_id']} об ошибке: {e}")
+
+                    # Уведомляем админов
+                    for admin_id in config.ADMIN_IDS:
+                        try:
+                            await bot.send_message(
+                                admin_id,
+                                f"⚠️ <b>Ошибка автопродления</b>\n\n"
+                                f"Пользователь: {user['full_name']}\n"
+                                f"Username: @{user['username'] or 'не указан'}\n"
+                                f"ID: {user['user_id']}",
+                                parse_mode="HTML"
+                            )
+                        except:
+                            pass
+
+            logger.info("Проверка истекающих подписок завершена")
+
+        except Exception as e:
+            logger.error(f"Ошибка в check_expiring_subscriptions: {e}")
+
+        # Ждём 24 часа до следующей проверки
+        await asyncio.sleep(24 * 60 * 60)
+
+
 async def main():
     """Запуск бота"""
     # Инициализация БД
@@ -1010,6 +1355,10 @@ async def main():
 
     # Регистрируем роутер
     dp.include_router(router)
+
+    # Запускаем фоновую задачу проверки подписок
+    asyncio.create_task(check_expiring_subscriptions())
+    logger.info("Фоновая задача проверки подписок запущена")
 
     # Запускаем polling
     logger.info("Бот запущен!")

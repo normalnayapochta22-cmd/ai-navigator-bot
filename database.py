@@ -27,8 +27,22 @@ class Database:
                     payment_expiry TEXT,
                     subscription_type TEXT,
                     payment_token TEXT,
-                    card_last4 TEXT
+                    card_last4 TEXT,
+                    auto_renewal BOOLEAN DEFAULT TRUE
                 )
+            """)
+
+            # Добавляем колонку auto_renewal если её нет (для существующих БД)
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'auto_renewal'
+                    ) THEN
+                        ALTER TABLE users ADD COLUMN auto_renewal BOOLEAN DEFAULT TRUE;
+                    END IF;
+                END $$;
             """)
 
             # Таблица платежей
@@ -190,3 +204,64 @@ class Database:
             if row and row['payment_token']:
                 return {'payment_token': row['payment_token'], 'card_last4': row['card_last4']}
             return None
+
+    async def get_auto_renewal_status(self, user_id: int) -> bool:
+        """Получить статус автопродления"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT auto_renewal FROM users WHERE user_id = $1", user_id
+            )
+            if row:
+                return row['auto_renewal'] if row['auto_renewal'] is not None else True
+            return True
+
+    async def set_auto_renewal(self, user_id: int, enabled: bool):
+        """Установить статус автопродления"""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET auto_renewal = $1 WHERE user_id = $2", enabled, user_id
+            )
+
+    async def get_users_expiring_today(self) -> List[Dict]:
+        """Получить пользователей с подпиской, истекающей сегодня"""
+        today = datetime.now().strftime("%d.%m.%Y")
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM users
+                WHERE is_paid = TRUE
+                AND payment_expiry = $1
+                AND auto_renewal = TRUE
+                AND payment_token IS NOT NULL
+            """, today)
+            return [dict(row) for row in rows]
+
+    async def get_users_expiring_soon(self, days: int = 3) -> List[Dict]:
+        """Получить пользователей для уведомления о скором окончании подписки"""
+        from datetime import timedelta
+        target_date = (datetime.now() + timedelta(days=days)).strftime("%d.%m.%Y")
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM users
+                WHERE is_paid = TRUE
+                AND payment_expiry = $1
+                AND auto_renewal = TRUE
+                AND payment_token IS NOT NULL
+            """, target_date)
+            return [dict(row) for row in rows]
+
+    async def extend_subscription(self, user_id: int, days: int = 30):
+        """Продлить подписку на указанное количество дней"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT payment_expiry FROM users WHERE user_id = $1", user_id
+            )
+            if row and row['payment_expiry']:
+                # Парсим текущую дату окончания
+                current_expiry = datetime.strptime(row['payment_expiry'], "%d.%m.%Y")
+                # Добавляем дни
+                from datetime import timedelta
+                new_expiry = (current_expiry + timedelta(days=days)).strftime("%d.%m.%Y")
+                await conn.execute(
+                    "UPDATE users SET payment_expiry = $1 WHERE user_id = $2",
+                    new_expiry, user_id
+                )
