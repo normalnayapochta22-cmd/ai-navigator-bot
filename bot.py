@@ -116,6 +116,10 @@ def get_admin_keyboard():
                 InlineKeyboardButton(text="Не оплатившие", callback_data="admin_unpaid_users"),
                 InlineKeyboardButton(text="Статистика", callback_data="admin_stats")
             ],
+            [
+                InlineKeyboardButton(text="💳 С картой", callback_data="admin_with_card"),
+                InlineKeyboardButton(text="❌ Без карты", callback_data="admin_without_card")
+            ],
             [InlineKeyboardButton(text="Рассылка неоплатившим", callback_data="admin_broadcast_unpaid")],
             [InlineKeyboardButton(text="Написать пользователю", callback_data="admin_send_message")],
         ]
@@ -1137,10 +1141,14 @@ async def admin_stats(callback: CallbackQuery):
     users = await db.get_all_users()
     paid_users = await db.get_paid_users()
     unpaid_users = await db.get_unpaid_users()
+    users_with_card = await db.get_users_with_card()
+    users_without_card = await db.get_users_without_card()
 
     total_users = len(users)
     total_paid = len(paid_users)
     total_unpaid = len(unpaid_users)
+    total_with_card = len(users_with_card)
+    total_without_card = len(users_without_card)
     conversion_rate = (total_paid / total_users * 100) if total_users > 0 else 0
 
     stats_text = f"""<b>Статистика</b>
@@ -1149,6 +1157,10 @@ async def admin_stats(callback: CallbackQuery):
 Оплатили подписку: {total_paid}
 Не оплатили: {total_unpaid}
 Конверсия: {conversion_rate:.1f}%
+
+<b>Автопродление:</b>
+💳 С привязанной картой: {total_with_card}
+❌ Без карты: {total_without_card}
 
 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"""
 
@@ -1159,6 +1171,81 @@ async def admin_stats(callback: CallbackQuery):
     )
 
     await callback.message.edit_text(stats_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_with_card")
+async def admin_with_card(callback: CallbackQuery):
+    """Пользователи с привязанной картой"""
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    users = await db.get_users_with_card()
+
+    if not users:
+        await callback.message.edit_text(
+            "Нет пользователей с привязанной картой.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Назад", callback_data="admin_back")],
+            ])
+        )
+        await callback.answer()
+        return
+
+    text = "<b>💳 Пользователи с картой:</b>\n\n"
+    for user in users[:20]:
+        auto = "🔔" if user.get('auto_renewal') else "🔕"
+        card = user.get('card_last4', '????')
+        text += f"{auto} {user['full_name']} (@{user['username']})\n"
+        text += f"   Карта: •••• {card} | До: {user['payment_expiry']}\n\n"
+
+    text += f"Всего: {len(users)}"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="admin_back")],
+        ]
+    )
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_without_card")
+async def admin_without_card(callback: CallbackQuery):
+    """Пользователи без карты"""
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    users = await db.get_users_without_card()
+
+    if not users:
+        await callback.message.edit_text(
+            "Все оплатившие пользователи привязали карту! 🎉",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Назад", callback_data="admin_back")],
+            ])
+        )
+        await callback.answer()
+        return
+
+    text = "<b>❌ Оплатившие БЕЗ карты:</b>\n\n"
+    for user in users[:20]:
+        text += f"• {user['full_name']} (@{user['username']})\n"
+        text += f"   До: {user['payment_expiry']} | ID: {user['user_id']}\n\n"
+
+    text += f"Всего: {len(users)}\n\n"
+    text += "<i>⚠️ У этих пользователей подписка НЕ продлится автоматически</i>"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="admin_back")],
+        ]
+    )
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
 

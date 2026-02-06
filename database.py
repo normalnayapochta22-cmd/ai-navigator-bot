@@ -265,3 +265,25 @@ class Database:
                     "UPDATE users SET payment_expiry = $1 WHERE user_id = $2",
                     new_expiry, user_id
                 )
+
+    async def get_users_with_card(self) -> List[Dict]:
+        """Получить оплативших пользователей с привязанной картой"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM users
+                WHERE is_paid = TRUE
+                AND payment_token IS NOT NULL
+                ORDER BY payment_expiry DESC
+            """)
+            return [dict(row) for row in rows]
+
+    async def get_users_without_card(self) -> List[Dict]:
+        """Получить оплативших пользователей без привязанной карты"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM users
+                WHERE is_paid = TRUE
+                AND (payment_token IS NULL OR payment_token = '')
+                ORDER BY payment_expiry DESC
+            """)
+            return [dict(row) for row in rows]
