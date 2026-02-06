@@ -622,7 +622,12 @@ async def my_profile(callback: CallbackQuery):
     if card_info:
         auto_renewal_text = "✅ Включено" if auto_renewal else "❌ Отключено"
     else:
-        auto_renewal_text = "— (нет карты)"
+        auto_renewal_text = "❌ Нет (карта не привязана)"
+
+    # Предупреждение если нет карты но есть подписка
+    no_card_warning = ""
+    if not card_info and user_data["is_paid"]:
+        no_card_warning = "\n\n⚠️ <i>Карта не привязана — подписка не продлится автоматически. Привяжите карту, чтобы не потерять доступ.</i>"
 
     profile_text = f"""👤 <b>Ваш профиль</b>
 
@@ -632,7 +637,7 @@ async def my_profile(callback: CallbackQuery):
 • Подписка: {status}
 • Активна до: {expiry}
 • {card_text}
-• Автопродление: {auto_renewal_text}
+• Автопродление: {auto_renewal_text}{no_card_warning}
 
 Для изменения данных — задайте вопрос в поддержку."""
 
@@ -645,6 +650,9 @@ async def my_profile(callback: CallbackQuery):
         else:
             buttons.append([InlineKeyboardButton(text="🔔 Включить автопродление", callback_data="toggle_auto_renewal_on")])
         buttons.append([InlineKeyboardButton(text="🗑 Отвязать карту", callback_data="unlink_card")])
+    elif user_data["is_paid"]:
+        # Если карта не привязана, но подписка есть — предложить привязать
+        buttons.append([InlineKeyboardButton(text="💳 Привязать карту", callback_data="link_card")])
     # Кнопка отмены подписки (если есть активная подписка)
     if user_data["is_paid"]:
         buttons.append([InlineKeyboardButton(text="❌ Отменить подписку", callback_data="cancel_subscription")])
@@ -741,6 +749,156 @@ async def toggle_auto_renewal_off(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer("Автопродление отключено")
+
+
+@router.callback_query(F.data == "link_card")
+async def link_card_info(callback: CallbackQuery):
+    """Информация о привязке карты"""
+    user_data = await db.get_user(callback.from_user.id)
+
+    # Определяем тариф пользователя
+    if user_data and user_data.get('subscription_type') == "3_months":
+        amount = config.PRICE_3_MONTHS
+        period = "3 месяца"
+    else:
+        amount = config.PRICE_1_MONTH
+        period = "1 месяц"
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Привязать карту", callback_data="link_card_pay")],
+            [InlineKeyboardButton(text="← Назад", callback_data="profile")],
+        ]
+    )
+
+    await callback.message.edit_text(
+        f"💳 <b>Привязка карты</b>\n\n"
+        f"Для привязки карты будет списан 1 ₽, который сразу вернётся.\n\n"
+        f"После привязки подписка будет автоматически продлеваться "
+        f"({amount} руб. / {period}).\n\n"
+        f"Отменить автопродление можно в любой момент.",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "link_card_pay")
+async def link_card_pay(callback: CallbackQuery):
+    """Создание платежа для привязки карты (1 рубль с возвратом)"""
+    user = callback.from_user
+
+    try:
+        # Создаём платёж на 1 рубль для привязки карты
+        payment = Payment.create({
+            "amount": {
+                "value": "1.00",
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "https://t.me/AInavigatorpulseofthefuture_bot"
+            },
+            "capture": False,  # Двухстадийный платёж — потом отменим
+            "save_payment_method": "true",
+            "description": f"Привязка карты (ID: {user.id})",
+            "metadata": {
+                "user_id": str(user.id),
+                "type": "card_link"
+            }
+        }, uuid.uuid4())
+
+        payment_url = payment.confirmation.confirmation_url
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Привязать", url=payment_url)],
+                [InlineKeyboardButton(text="✅ Я привязал", callback_data=f"check_link_{payment.id}")],
+                [InlineKeyboardButton(text="← Назад", callback_data="profile")],
+            ]
+        )
+
+        await callback.message.edit_text(
+            "💳 <b>Привязка карты</b>\n\n"
+            "Нажмите «Привязать» и введите данные карты.\n"
+            "Будет списан 1 ₽, который сразу вернётся.\n\n"
+            "После привязки нажмите «Я привязал».",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка создания платежа для привязки: {e}")
+        await callback.message.edit_text(
+            "Ошибка привязки карты. Попробуйте позже.",
+            reply_markup=get_back_keyboard(),
+            parse_mode="HTML"
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("check_link_"))
+async def check_link_status(callback: CallbackQuery):
+    """Проверка статуса привязки карты"""
+    payment_id = callback.data.replace("check_link_", "")
+    user = callback.from_user
+
+    try:
+        payment = Payment.find_one(payment_id)
+
+        if payment.status == "waiting_for_capture":
+            # Карта привязана, отменяем платёж чтобы вернуть 1 рубль
+            if payment.payment_method and payment.payment_method.saved:
+                card_last4 = payment.payment_method.card.last4 if payment.payment_method.card else "0000"
+                await db.save_payment_token(user.id, payment.payment_method.id, card_last4)
+                await db.set_auto_renewal(user.id, True)
+
+                # Отменяем платёж (возврат 1 рубля)
+                Payment.cancel(payment_id)
+
+                # Уведомляем админов
+                for admin_id in config.ADMIN_IDS:
+                    try:
+                        await bot.send_message(
+                            admin_id,
+                            f"💳 <b>Карта привязана</b>\n\n"
+                            f"Пользователь: {user.full_name}\n"
+                            f"Username: @{user.username or 'не указан'}\n"
+                            f"Карта: •••• {card_last4}",
+                            parse_mode="HTML"
+                        )
+                    except:
+                        pass
+
+                await callback.message.edit_text(
+                    f"✅ <b>Карта привязана!</b>\n\n"
+                    f"Карта •••• {card_last4} успешно привязана.\n"
+                    f"Автопродление включено.\n\n"
+                    f"1 ₽ вернётся на карту.",
+                    reply_markup=get_back_keyboard(),
+                    parse_mode="HTML"
+                )
+                await callback.answer("Карта привязана!")
+            else:
+                await callback.answer("Карта не была сохранена. Попробуйте ещё раз.", show_alert=True)
+
+        elif payment.status == "pending":
+            await callback.answer("⏳ Ожидаем подтверждения. Завершите оплату и попробуйте снова.", show_alert=True)
+
+        elif payment.status == "canceled":
+            await callback.message.edit_text(
+                "❌ Привязка отменена. Попробуйте ещё раз.",
+                reply_markup=get_back_keyboard(),
+                parse_mode="HTML"
+            )
+            await callback.answer()
+
+        else:
+            await callback.answer(f"Статус: {payment.status}", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"Ошибка проверки привязки: {e}")
+        await callback.answer("Ошибка проверки. Попробуйте позже.", show_alert=True)
 
 
 @router.callback_query(F.data == "toggle_auto_renewal_on")
