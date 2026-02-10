@@ -45,6 +45,10 @@ class AdminBroadcast(StatesGroup):
     waiting_for_broadcast_message = State()
 
 
+class AdminActivateSub(StatesGroup):
+    waiting_for_user_id = State()
+
+
 # Клавиатуры
 def get_main_keyboard():
     """Главное меню - inline кнопки"""
@@ -120,6 +124,7 @@ def get_admin_keyboard():
                 InlineKeyboardButton(text="💳 С картой", callback_data="admin_with_card"),
                 InlineKeyboardButton(text="❌ Без карты", callback_data="admin_without_card")
             ],
+            [InlineKeyboardButton(text="✅ Активировать подписку", callback_data="admin_activate_sub")],
             [InlineKeyboardButton(text="Рассылка неоплатившим", callback_data="admin_broadcast_unpaid")],
             [InlineKeyboardButton(text="Написать пользователю", callback_data="admin_send_message")],
         ]
@@ -1247,6 +1252,172 @@ async def admin_without_card(callback: CallbackQuery):
 
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin_activate_sub")
+async def admin_activate_sub_start(callback: CallbackQuery, state: FSMContext):
+    """Начать активацию подписки"""
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "<b>Активация подписки</b>\n\n"
+        "Введите ID пользователя:",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminActivateSub.waiting_for_user_id)
+    await callback.answer()
+
+
+@router.message(AdminActivateSub.waiting_for_user_id)
+async def admin_activate_sub_get_id(message: Message, state: FSMContext):
+    """Получить ID и показать выбор тарифа"""
+    if message.from_user.id not in config.ADMIN_IDS:
+        return
+
+    try:
+        user_id = int(message.text.strip())
+
+        # Проверяем существует ли пользователь
+        user_data = await db.get_user(user_id)
+        if not user_data:
+            await message.answer(
+                f"❌ Пользователь с ID {user_id} не найден в базе.\n"
+                "Он должен сначала написать /start боту.",
+                reply_markup=get_cancel_keyboard()
+            )
+            return
+
+        await state.update_data(target_user_id=user_id, user_data=user_data)
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="1 месяц (30 дней)", callback_data="activate_1month")],
+                [InlineKeyboardButton(text="3 месяца (90 дней)", callback_data="activate_3months")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel_action")],
+            ]
+        )
+
+        await message.answer(
+            f"<b>Активация подписки</b>\n\n"
+            f"Пользователь: {user_data['full_name']}\n"
+            f"Username: @{user_data['username']}\n"
+            f"ID: {user_id}\n"
+            f"Текущий статус: {'✅ Оплачено' if user_data['is_paid'] else '❌ Не оплачено'}\n\n"
+            f"Выберите тариф:",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except ValueError:
+        await message.answer("❌ Неверный формат ID. Введите число:")
+
+
+@router.callback_query(F.data == "activate_1month")
+async def activate_1month(callback: CallbackQuery, state: FSMContext):
+    """Активировать подписку на 1 месяц"""
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    data = await state.get_data()
+    user_id = data.get("target_user_id")
+    user_data = data.get("user_data")
+
+    if not user_id:
+        await callback.answer("Ошибка: ID не найден", show_alert=True)
+        await state.clear()
+        return
+
+    # Активируем подписку на 30 дней
+    expiry_date = (datetime.now() + timedelta(days=30)).strftime("%d.%m.%Y")
+    await db.mark_user_paid(user_id, "1_month", expiry_date)
+
+    # Уведомляем пользователя
+    try:
+        join_keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🚀 Войти в клуб", url=config.CLUB_GROUP_LINK)],
+            ]
+        )
+        await bot.send_message(
+            user_id,
+            f"✅ <b>Ваша подписка активирована!</b>\n\n"
+            f"Тариф: 1 месяц\n"
+            f"Активна до: {expiry_date}\n\n"
+            f"🎉 Добро пожаловать в клуб!",
+            reply_markup=join_keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Не удалось уведомить пользователя {user_id}: {e}")
+
+    await callback.message.edit_text(
+        f"✅ <b>Подписка активирована!</b>\n\n"
+        f"Пользователь: {user_data['full_name']} (@{user_data['username']})\n"
+        f"Тариф: 1 месяц\n"
+        f"Активна до: {expiry_date}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+    await state.clear()
+    await callback.answer("Подписка активирована!")
+
+
+@router.callback_query(F.data == "activate_3months")
+async def activate_3months(callback: CallbackQuery, state: FSMContext):
+    """Активировать подписку на 3 месяца"""
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    data = await state.get_data()
+    user_id = data.get("target_user_id")
+    user_data = data.get("user_data")
+
+    if not user_id:
+        await callback.answer("Ошибка: ID не найден", show_alert=True)
+        await state.clear()
+        return
+
+    # Активируем подписку на 90 дней
+    expiry_date = (datetime.now() + timedelta(days=90)).strftime("%d.%m.%Y")
+    await db.mark_user_paid(user_id, "3_months", expiry_date)
+
+    # Уведомляем пользователя
+    try:
+        join_keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🚀 Войти в клуб", url=config.CLUB_GROUP_LINK)],
+            ]
+        )
+        await bot.send_message(
+            user_id,
+            f"✅ <b>Ваша подписка активирована!</b>\n\n"
+            f"Тариф: 3 месяца\n"
+            f"Активна до: {expiry_date}\n\n"
+            f"🎉 Добро пожаловать в клуб!",
+            reply_markup=join_keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Не удалось уведомить пользователя {user_id}: {e}")
+
+    await callback.message.edit_text(
+        f"✅ <b>Подписка активирована!</b>\n\n"
+        f"Пользователь: {user_data['full_name']} (@{user_data['username']})\n"
+        f"Тариф: 3 месяца\n"
+        f"Активна до: {expiry_date}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+    await state.clear()
+    await callback.answer("Подписка активирована!")
 
 
 @router.callback_query(F.data == "admin_broadcast_unpaid")
