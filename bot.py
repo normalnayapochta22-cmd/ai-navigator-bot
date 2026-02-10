@@ -49,6 +49,12 @@ class AdminActivateSub(StatesGroup):
     waiting_for_user_id = State()
 
 
+class AdminLinkCard(StatesGroup):
+    waiting_for_user_id = State()
+    waiting_for_token = State()
+    waiting_for_last4 = State()
+
+
 # Клавиатуры
 def get_main_keyboard():
     """Главное меню - inline кнопки"""
@@ -125,6 +131,7 @@ def get_admin_keyboard():
                 InlineKeyboardButton(text="❌ Без карты", callback_data="admin_without_card")
             ],
             [InlineKeyboardButton(text="✅ Активировать подписку", callback_data="admin_activate_sub")],
+            [InlineKeyboardButton(text="💳 Привязать карту вручную", callback_data="admin_link_card")],
             [InlineKeyboardButton(text="Рассылка неоплатившим", callback_data="admin_broadcast_unpaid")],
             [InlineKeyboardButton(text="Написать пользователю", callback_data="admin_send_message")],
         ]
@@ -1418,6 +1425,117 @@ async def activate_3months(callback: CallbackQuery, state: FSMContext):
     )
     await state.clear()
     await callback.answer("Подписка активирована!")
+
+
+@router.callback_query(F.data == "admin_link_card")
+async def admin_link_card_start(callback: CallbackQuery, state: FSMContext):
+    """Начать привязку карты вручную"""
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "<b>Привязка карты вручную</b>\n\n"
+        "Введите ID пользователя:",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminLinkCard.waiting_for_user_id)
+    await callback.answer()
+
+
+@router.message(AdminLinkCard.waiting_for_user_id)
+async def admin_link_card_get_id(message: Message, state: FSMContext):
+    """Получить ID пользователя"""
+    if message.from_user.id not in config.ADMIN_IDS:
+        return
+
+    try:
+        user_id = int(message.text.strip())
+        user_data = await db.get_user(user_id)
+
+        if not user_data:
+            await message.answer(
+                f"❌ Пользователь с ID {user_id} не найден.",
+                reply_markup=get_cancel_keyboard()
+            )
+            return
+
+        await state.update_data(target_user_id=user_id, user_data=user_data)
+        await message.answer(
+            f"Пользователь: {user_data['full_name']} (@{user_data['username']})\n\n"
+            "Введите <b>payment_method.id</b> из ЮKassa\n"
+            "(например: 2a217a2d-000f-5000-9000-1bd6f124af9c):",
+            reply_markup=get_cancel_keyboard(),
+            parse_mode="HTML"
+        )
+        await state.set_state(AdminLinkCard.waiting_for_token)
+
+    except ValueError:
+        await message.answer("❌ Неверный формат ID. Введите число:")
+
+
+@router.message(AdminLinkCard.waiting_for_token)
+async def admin_link_card_get_token(message: Message, state: FSMContext):
+    """Получить токен карты"""
+    if message.from_user.id not in config.ADMIN_IDS:
+        return
+
+    token = message.text.strip()
+
+    # Простая проверка формата UUID
+    if len(token) < 30 or '-' not in token:
+        await message.answer(
+            "❌ Неверный формат токена. Должен быть UUID.\n"
+            "Введите payment_method.id:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    await state.update_data(payment_token=token)
+    await message.answer(
+        "Введите <b>последние 4 цифры карты</b> (card.last4):",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminLinkCard.waiting_for_last4)
+
+
+@router.message(AdminLinkCard.waiting_for_last4)
+async def admin_link_card_get_last4(message: Message, state: FSMContext):
+    """Получить последние 4 цифры и сохранить карту"""
+    if message.from_user.id not in config.ADMIN_IDS:
+        return
+
+    last4 = message.text.strip()
+
+    if not last4.isdigit() or len(last4) != 4:
+        await message.answer(
+            "❌ Введите ровно 4 цифры:",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+
+    data = await state.get_data()
+    user_id = data.get("target_user_id")
+    user_data = data.get("user_data")
+    payment_token = data.get("payment_token")
+
+    # Сохраняем карту
+    await db.save_payment_token(user_id, payment_token, last4)
+    await db.set_auto_renewal(user_id, True)
+
+    await message.answer(
+        f"✅ <b>Карта привязана!</b>\n\n"
+        f"Пользователь: {user_data['full_name']} (@{user_data['username']})\n"
+        f"Карта: •••• {last4}\n"
+        f"Автопродление: включено",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад в админку", callback_data="admin_back")],
+        ]),
+        parse_mode="HTML"
+    )
+    await state.clear()
 
 
 @router.callback_query(F.data == "admin_broadcast_unpaid")
