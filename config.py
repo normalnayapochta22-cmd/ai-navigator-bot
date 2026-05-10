@@ -11,7 +11,7 @@ ADMIN_IDS = [590597992, 554519803]  # Софья Маковень, Анна Ал
 
 # ЮKassa настройки
 YUKASSA_SHOP_ID = "1258598"
-YUKASSA_SECRET_KEY = "live_GzDIlnTfuL7FKls7TKKWc_1sjFFFPMBy6BbGwbZBDyw"
+YUKASSA_SECRET_KEY = ""  # DISABLED - payments turned off
 
 # Ссылка на группу клуба
 CLUB_GROUP_LINK = "https://t.me/+VKGe-NTkq1hkOTEy"
